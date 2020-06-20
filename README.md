@@ -1,8 +1,5 @@
 # Programming Project
 For this project, you'll be using a publically available data source of schools in a CSV format. You'll download the data file and write two Python programs to manipulate the data.
-* We expect this to take around 2 hours to complete. If it seems like it will take significantly longer than that to complete, please ask us first to make sure you aren't over-complicating the project.
-
-_**Please commit all code to this Github repo, and press the “Finish” button in the top-right corner in Py once you’ve completed the challenge to let us know you’re done.**_
 
 ## Part 0: Get the data
 * Go to [this page](https://nces.ed.gov/ccd/CCDLocaleCode.asp) and download the dataset described as:
