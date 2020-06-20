@@ -1,4 +1,4 @@
-# NuffSaid Backend Programming Project
+# Programming Project
 For this project, you'll be using a publically available data source of schools in a CSV format. You'll download the data file and write two Python programs to manipulate the data.
 * We expect this to take around 2 hours to complete. If it seems like it will take significantly longer than that to complete, please ask us first to make sure you aren't over-complicating the project.
 
