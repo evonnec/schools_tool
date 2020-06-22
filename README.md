@@ -1,5 +1,5 @@
 # Programming Project
-For this project, you'll be using a publically available data source of schools in a CSV format. You'll download the data file and write two Python programs to manipulate the data.
+For this project, you'll be using a publicly available data source of schools in a CSV format. You'll download the data file and write two Python programs to manipulate the data.
 
 ## Part 0: Get the data
 * Go to [this page](https://nces.ed.gov/ccd/CCDLocaleCode.asp) and download the dataset described as:
