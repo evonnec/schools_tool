@@ -41,8 +41,10 @@ class TestSchoolCount:
 
 import school_search
 
-class TestSearchSchool:
+class ___:
+    
     """
+    TestSearchSchool
     Test Cases for school_search.py
     """
     def test_search_highland_park():
