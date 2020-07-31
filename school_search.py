@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
 
 import csv
-import time 
+import time
 
-def get_school_data_dataframes(input_file="./input/school_data.csv"):
+
+_DATAFRAMES = None
+
+def get_school_data_dataframes(state_to_abbreviation_map):
     """
     Take the csv and return a list of lists dataframe
     """
-    school_df, header = [], None
-    with open (input_file, mode='r', encoding='ISO-8859–1') as schools_input_file:
-        csvreader = csv.reader(schools_input_file, delimiter=',')    
-        for row in csvreader:        
-            if header is None: header = row
-            else:
-                [school_id, agency_id, operating_agency_name, school_name, city_name, state, latitude, longitude, metro_centric_locale, urban_centric_locale, school_status_code] = row
-                school_df.append(row)
-        return school_df
+    global _DATAFRAMES
+    if _DATAFRAMES is None:
+        input_file = "./input/school_data.csv"
+        school_df, header = [], None
+        with open (input_file, mode='r', encoding='ISO-8859–1') as schools_input_file:
+            csvreader = csv.reader(schools_input_file, delimiter=',')    
+            for row in csvreader:        
+                if header is None: header = row
+                else:
+                    [school_id, agency_id, operating_agency_name, school_name, city_name, state, latitude, longitude, metro_centric_locale, urban_centric_locale, school_status_code] = row
+                    # if state in state_to_abbreviation_map:
+                    #     full_state_name = state_to_abbreviation_map[state]
+                    # else:
+                    #     full_state_name = ''
+                    school_df.append([school_name, city_name, state])
+            _DATAFRAMES = school_df
+            return school_df
+    else:
+        return _DATAFRAMES
 
 def map_abbreviation_to_state(abbr_file="./input/name-abbr.csv"):
     """
@@ -38,7 +51,7 @@ def is_word_in_dataframe_row(dataframe_row, word, state_to_abbreviation_map):
     """
     Determine if the search term word is in the dataframe row 
     """
-    [school_id, agency_id, operating_agency_name, school_name, city_name, state, latitude, longitude, metro_centric_locale, urban_centric_locale, school_status_code] = dataframe_row
+    [school_name, city_name, state] = dataframe_row
     if state in state_to_abbreviation_map:
         full_state_name = state_to_abbreviation_map[state]
         search_fields = [school_name, city_name, full_state_name]
@@ -87,7 +100,7 @@ def format_result(dataframe_item):
     """
     Returns a string which looks like README strings
     """
-    [school_id, agency_id, operating_agency_name, school_name, city_name, state, latitude, longitude, metro_centric_locale, urban_centric_locale, school_status_code] = dataframe_item
+    [school_name, city_name, state] = dataframe_item
     string_to_return = school_name + '\n' + city_name + ', ' + state
     return string_to_return
 
@@ -95,19 +108,31 @@ def search_school_results(full_search_term):
     """
     Returns formatted results search_schools
     """
+    time_to_make_map_abbrv_start = time.perf_counter_ns()
     state_to_abbreviation_map = map_abbreviation_to_state()
-    dataframe_without_headings = get_school_data_dataframes()
+    time_to_make_map_abbrv_end = time.perf_counter_ns()
+    time_to_make_map_abbrv = (time_to_make_map_abbrv_end - time_to_make_map_abbrv_start) / 1000000000
+
+    time_to_get_dataframes_start = time.perf_counter_ns()
+    dataframe_without_headings = get_school_data_dataframes(state_to_abbreviation_map)
+    time_to_get_dataframes_end = time.perf_counter_ns()
+    time_to_get_dataframes = (time_to_get_dataframes_end - time_to_get_dataframes_start) / 1000000000
+
+    time_to_search_start = time.perf_counter_ns()
     search_results = search_full_search_term_within_dataframe(
         full_search_term=full_search_term,
         dataframe=dataframe_without_headings,
         state_to_abbreviation_map=state_to_abbreviation_map,
     )
-    results = []
-    for item in search_results:
-        formatted_result = format_result(item)
-        results.append(formatted_result)
+    time_to_search_end = time.perf_counter_ns()
+    time_to_search = (time_to_search_end - time_to_search_start) / 1000000000
 
-    return results
+
+    print('time_to_make_map_abbrv', time_to_make_map_abbrv)
+    print('time_to_get_dataframes', time_to_get_dataframes)
+    print('time_to_search', time_to_search)
+
+    return search_results
 
 def search_schools(full_search_term):
     """
@@ -120,7 +145,8 @@ def search_schools(full_search_term):
     execution_time = (end - start) / 1000000000
     print('Results for "' + full_search_term + '" (search took: ' + str(execution_time) + 's)')
     for search_result in formatted_results[:3]:
-        ready_to_print = str(position) + '. ' + search_result
+        formatted_result = format_result(search_result)
+        ready_to_print = str(position) + '. ' + formatted_result
         position += 1
         print(ready_to_print)
 
