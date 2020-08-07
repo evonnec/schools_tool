@@ -24,7 +24,7 @@ def get_school_data_dataframes(state_to_abbreviation_map):
                     #     full_state_name = state_to_abbreviation_map[state]
                     # else:
                     #     full_state_name = ''
-                    school_df.append([school_name, city_name, state])
+                    school_df.append([school_name.upper(), city_name.upper(), state.upper()])
             _DATAFRAMES = school_df
             return school_df
     else:
@@ -50,6 +50,8 @@ def map_abbreviation_to_state(abbr_file="./input/name-abbr.csv"):
 def is_word_in_dataframe_row(dataframe_row, word, state_to_abbreviation_map):
     """
     Determine if the search term word is in the dataframe row 
+
+    Word must be uppercase.
     """
     [school_name, city_name, state] = dataframe_row
     if state in state_to_abbreviation_map:
@@ -60,7 +62,7 @@ def is_word_in_dataframe_row(dataframe_row, word, state_to_abbreviation_map):
 
     is_match = False
     for search_field in search_fields:
-        if word.upper() in search_field.upper():
+        if word in search_field:
             is_match = True
     return is_match
 
@@ -74,11 +76,21 @@ def search_full_search_term_within_dataframe(dataframe, full_search_term, state_
 
     dataframe_scores = {}
 
+    time_ns_checking_if_index_exists = 0
+    time_ns_checking_if_word_in_df = 0
+
+    #start_creating_dictionary = time.perf_counter_ns()
     for word in words_in_term:
+        word = word.upper()
         for index, row in enumerate(dataframe):
+            #start_checking_if_index_exists = time.perf_counter_ns()
             if index not in dataframe_scores:
                 dataframe_scores[index] = 0
             
+            #end_checking_if_index_exists = time.perf_counter_ns()
+            #time_ns_checking_if_index_exists += (end_checking_if_index_exists - start_checking_if_index_exists)
+
+            start_checking_if_word_in_df = time.perf_counter_ns()
             if is_word_in_dataframe_row(
                 dataframe_row=row,
                 word=word,
@@ -91,9 +103,30 @@ def search_full_search_term_within_dataframe(dataframe, full_search_term, state_
                     dataframe_scores[index] = dataframe_scores[index] + 0.5
                 else:
                     dataframe_scores[index] = dataframe_scores[index] + 1
+            #end_checking_if_word_in_df = time.perf_counter_ns()
+            #time_ns_checking_if_word_in_df += (end_checking_if_word_in_df - start_checking_if_word_in_df)
 
+    #print('time_checking_if_index_exists ' + str(time_ns_checking_if_index_exists / 1000000000))
+    #print('time_checking_if_word_in_df ' + str(time_ns_checking_if_word_in_df / 1000000000))
+    #end_creating_dictionary = time.perf_counter_ns()
+
+    #start_sorting = time.perf_counter_ns()
     sorted_schools_by_rank = sorted(dataframe_scores.keys(), key=lambda index: dataframe_scores[index], reverse=True)
+    #end_sorting = time.perf_counter_ns()
+
+    #start_top_res = time.perf_counter_ns()
     top_results = [dataframe[index] for index in sorted_schools_by_rank if dataframe_scores[index]]
+    #end_top_res = time.perf_counter_ns()
+
+    #time_taken_creating_dictionary = (end_creating_dictionary - start_creating_dictionary) / 1000000000
+    #print('time_taken_creating_dictionary ' + str(time_taken_creating_dictionary))
+    
+    #time_taken_sorting = (end_sorting - start_sorting) / 1000000000
+    #print('time_taken_sorting ' + str(time_taken_sorting))
+    
+    #time_taken_top_res = (end_top_res - start_top_res) / 1000000000
+    #print('time_taken_top_res ' + str(time_taken_sorting))
+
     return top_results
 
 def format_result(dataframe_item):
@@ -108,29 +141,29 @@ def search_school_results(full_search_term):
     """
     Returns formatted results search_schools
     """
-    time_to_make_map_abbrv_start = time.perf_counter_ns()
+    #time_to_make_map_abbrv_start = time.perf_counter_ns()
     state_to_abbreviation_map = map_abbreviation_to_state()
-    time_to_make_map_abbrv_end = time.perf_counter_ns()
-    time_to_make_map_abbrv = (time_to_make_map_abbrv_end - time_to_make_map_abbrv_start) / 1000000000
+    #time_to_make_map_abbrv_end = time.perf_counter_ns()
+    #time_to_make_map_abbrv = (time_to_make_map_abbrv_end - time_to_make_map_abbrv_start) / 1000000000
 
-    time_to_get_dataframes_start = time.perf_counter_ns()
+    #time_to_get_dataframes_start = time.perf_counter_ns()
     dataframe_without_headings = get_school_data_dataframes(state_to_abbreviation_map)
-    time_to_get_dataframes_end = time.perf_counter_ns()
-    time_to_get_dataframes = (time_to_get_dataframes_end - time_to_get_dataframes_start) / 1000000000
+    #time_to_get_dataframes_end = time.perf_counter_ns()
+    #time_to_get_dataframes = (time_to_get_dataframes_end - time_to_get_dataframes_start) / 1000000000
 
-    time_to_search_start = time.perf_counter_ns()
+    #time_to_search_start = time.perf_counter_ns()
     search_results = search_full_search_term_within_dataframe(
         full_search_term=full_search_term,
         dataframe=dataframe_without_headings,
         state_to_abbreviation_map=state_to_abbreviation_map,
     )
-    time_to_search_end = time.perf_counter_ns()
-    time_to_search = (time_to_search_end - time_to_search_start) / 1000000000
+    #time_to_search_end = time.perf_counter_ns()
+    #time_to_search = (time_to_search_end - time_to_search_start) / 1000000000
 
 
-    print('time_to_make_map_abbrv', time_to_make_map_abbrv)
-    print('time_to_get_dataframes', time_to_get_dataframes)
-    print('time_to_search', time_to_search)
+    #print('time_to_make_map_abbrv', time_to_make_map_abbrv)
+    #print('time_to_get_dataframes', time_to_get_dataframes)
+    #print('time_to_search', time_to_search)
 
     return search_results
 
@@ -139,11 +172,11 @@ def search_schools(full_search_term):
     search_schools function described in README return printed results
     """
     position = 1
-    start = time.perf_counter_ns()
+    #start = time.perf_counter_ns()
     formatted_results = search_school_results(full_search_term)
-    end = time.perf_counter_ns()
-    execution_time = (end - start) / 1000000000
-    print('Results for "' + full_search_term + '" (search took: ' + str(execution_time) + 's)')
+    #end = time.perf_counter_ns()
+    #execution_time = (end - start) / 1000000000
+    #print('Results for "' + full_search_term + '" (search took: ' + str(execution_time) + 's)')
     for search_result in formatted_results[:3]:
         formatted_result = format_result(search_result)
         ready_to_print = str(position) + '. ' + formatted_result
