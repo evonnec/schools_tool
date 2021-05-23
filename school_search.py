@@ -24,7 +24,14 @@ def get_school_data_dataframes(state_to_abbreviation_map):
                     #     full_state_name = state_to_abbreviation_map[state]
                     # else:
                     #     full_state_name = ''
-                    school_df.append([school_name.upper(), city_name.upper(), state.upper()])
+                    if state in state_to_abbreviation_map:
+                        full_state_name = state_to_abbreviation_map[state]
+                        search_fields = [school_name.upper(), city_name.upper(), full_state_name.upper()]
+                    else:
+                        search_fields = [school_name.upper(), city_name.upper()]
+
+                    search_string = ' '.join(search_fields)
+                    school_df.append(search_string)
             _DATAFRAMES = school_df
             return school_df
     else:
@@ -47,24 +54,13 @@ def map_abbreviation_to_state(abbr_file="./input/name-abbr.csv"):
                 map_state.update({state_code.upper(): state_name.upper()})
         return map_state
 
-def is_word_in_dataframe_row(dataframe_row, word, state_to_abbreviation_map):
+def is_word_in_dataframe_row(dataframe_row, word):
     """
     Determine if the search term word is in the dataframe row 
 
     Word must be uppercase.
     """
-    [school_name, city_name, state] = dataframe_row
-    if state in state_to_abbreviation_map:
-        full_state_name = state_to_abbreviation_map[state]
-        search_fields = [school_name, city_name, full_state_name]
-    else:
-        search_fields = [school_name, city_name]
-
-    is_match = False
-    for search_field in search_fields:
-        if word in search_field:
-            is_match = True
-    return is_match
+    return bool(word in dataframe_row)
 
 
 def search_full_search_term_within_dataframe(dataframe, full_search_term, state_to_abbreviation_map):
@@ -82,6 +78,11 @@ def search_full_search_term_within_dataframe(dataframe, full_search_term, state_
     #start_creating_dictionary = time.perf_counter_ns()
     for word in words_in_term:
         word = word.upper()
+        word_is_school = bool(word == 'SCHOOL')
+        if word_is_school:
+            extra_score = 0.5
+        else:
+            extra_score = 1
         for index, row in enumerate(dataframe):
             #start_checking_if_index_exists = time.perf_counter_ns()
             if index not in dataframe_scores:
@@ -94,15 +95,12 @@ def search_full_search_term_within_dataframe(dataframe, full_search_term, state_
             if is_word_in_dataframe_row(
                 dataframe_row=row,
                 word=word,
-                state_to_abbreviation_map=state_to_abbreviation_map,
             ):
                 # All items are schools, and allowing "school" to give a full
                 # score point means we miss great matches.
                 # Half a point is arbitrary.
-                if word.lower() == 'school':
-                    dataframe_scores[index] = dataframe_scores[index] + 0.5
-                else:
-                    dataframe_scores[index] = dataframe_scores[index] + 1
+                dataframe_scores[index] = dataframe_scores[index] + extra_score
+
             #end_checking_if_word_in_df = time.perf_counter_ns()
             #time_ns_checking_if_word_in_df += (end_checking_if_word_in_df - start_checking_if_word_in_df)
 
@@ -115,7 +113,7 @@ def search_full_search_term_within_dataframe(dataframe, full_search_term, state_
     #end_sorting = time.perf_counter_ns()
 
     #start_top_res = time.perf_counter_ns()
-    top_results = [dataframe[index] for index in sorted_schools_by_rank if dataframe_scores[index]]
+    top_results = [dataframe[index] for index in sorted_schools_by_rank[:3] if dataframe_scores[index]]
     #end_top_res = time.perf_counter_ns()
 
     #time_taken_creating_dictionary = (end_creating_dictionary - start_creating_dictionary) / 1000000000
@@ -133,8 +131,9 @@ def format_result(dataframe_item):
     """
     Returns a string which looks like README strings
     """
-    [school_name, city_name, state] = dataframe_item
-    string_to_return = school_name + '\n' + city_name + ', ' + state
+    #[school_name, city_name, state] = dataframe_item.split()
+    #string_to_return = school_name + '\n' + city_name + ', ' + state
+    string_to_return = dataframe_item
     return string_to_return
 
 def search_school_results(full_search_term):
