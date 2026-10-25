@@ -1,9 +1,11 @@
+import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from schools_tool.dataset import (
+    SCHOOL_DATA_CSV,
     School,
     city_key,
     clean,
@@ -232,6 +234,22 @@ def test_load_state_names(tmp_path: Path) -> None:
 
 class TestBundledData:
     """Checks on the dataset shipped in the package."""
+
+    def test_file_is_unchanged(self) -> None:
+        # Checksums recorded in the README's "Source" section
+        data = SCHOOL_DATA_CSV.read_bytes()
+        assert (
+            hashlib.sha256(data).hexdigest()
+            == "1fc0269c82ec7c9a15a83c9095ae52773b5dfe07c651ec176bad409fb9c0f797"
+        )
+
+    def test_windows_line_endings_reproduce_the_nces_download(self) -> None:
+        # sl051bai.csv from https://nces.ed.gov/ccd/data/zip/sl051bai_csv.zip
+        crlf = SCHOOL_DATA_CSV.read_bytes().replace(b"\n", b"\r\n")
+        assert (
+            hashlib.sha256(crlf).hexdigest()
+            == "437e081a2f4dc4e7d9d43078982a605c347835b151ac0a62edf1f663edaf8a41"
+        )
 
     def test_row_count_and_unique_ids(self, bundled_schools: list[School]) -> None:
         assert len(bundled_schools) == 34779

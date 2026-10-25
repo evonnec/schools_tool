@@ -108,7 +108,8 @@ def tokenize(text: str) -> list[str]:
 
 
 def one_edit_away(word: str) -> set[str]:
-    """Every string one deletion, swap, replacement, or insertion from word."""
+    """Every string one deletion, swap, replacement, or insertion from word,
+    as in Peter Norvig's spelling corrector (norvig.com/spell-correct.html)."""
     splits = [(word[:i], word[i:]) for i in range(len(word) + 1)]
     deletes = [left + right[1:] for left, right in splits if right]
     swaps = [
