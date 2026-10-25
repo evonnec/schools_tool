@@ -81,8 +81,22 @@ Times are the best of five runs. The reported "search took" time covers only the
 
 The data ships inside the package (`src/schools_tool/data/`), so the wheel works from any directory.
 
-- `school_data.csv` is the NCES file `sl051b` for 2005-06. It is byte-for-byte the official download except for line endings. An earlier copy had replaced one byte with U+FFFD; that byte is restored.
+- `school_data.csv` is the NCES public school locale file for 2005-06, version 1b, states A–I. It is byte-for-byte the official download except for line endings. An earlier copy had replaced one byte with U+FFFD; that byte is restored.
 - `name-abbr.csv` maps postal codes to state names, for searching by state name.
+
+**Source.** The original download comes from the [NCES locale code page](https://nces.ed.gov/ccd/CCDLocaleCode.asp): [`sl051bai_csv.zip`](https://nces.ed.gov/ccd/data/zip/sl051bai_csv.zip), which holds one file, `sl051bai.csv`. The file layout is documented in [`sl051bgen.pdf`](https://nces.ed.gov/ccd/pdf/sl051bgen.pdf). Earlier versions of this repo kept a copy of the download as `input/sl951b.csv`. It isn't needed, because converting the bundled file back to Windows line endings reproduces the download exactly:
+
+```bash
+sed 's/$/\r/' src/schools_tool/data/school_data.csv > sl051bai.csv
+```
+
+| File | SHA-256 |
+| --- | --- |
+| `sl051bai_csv.zip` (as downloaded) | `c1f19901a41f793ef388c31a7408e313b4cab3d784edd43fa8dc074ea69abcb3` |
+| `sl051bai.csv` (in the zip) | `437e081a2f4dc4e7d9d43078982a605c347835b151ac0a62edf1f663edaf8a41` |
+| `src/schools_tool/data/school_data.csv` | `1fc0269c82ec7c9a15a83c9095ae52773b5dfe07c651ec176bad409fb9c0f797` |
+
+The tests check the last two, so a change to the bundled data fails CI.
 
 `dataset.load_schools` handles the file's quirks in one place, and the tests check each one:
 
