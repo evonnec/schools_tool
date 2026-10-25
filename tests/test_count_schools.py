@@ -170,7 +170,7 @@ class TestBundledData:
         )
 
     def test_unique_cities(self, bundled_schools: list[School]) -> None:
-        assert count_schools.unique_city_count(bundled_schools) == 5684
+        assert count_schools.unique_city_count(bundled_schools) == 5670
 
     def test_print_counts_loads_the_bundled_data(
         self, capsys: pytest.CaptureFixture[str]
@@ -179,4 +179,4 @@ class TestBundledData:
         lines = capsys.readouterr().out.splitlines()
         assert lines[0] == "Total Schools: 34779"
         assert "City with most schools: CHICAGO, IL (657 schools)" in lines
-        assert lines[-1] == "Unique cities with at least one school: 5684"
+        assert lines[-1] == "Unique cities with at least one school: 5670"

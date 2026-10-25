@@ -69,6 +69,23 @@ def test_closed_pipe_exits_quietly() -> None:
     assert process.returncode == 1
 
 
+def test_reader_gone_before_any_output_exits_quietly() -> None:
+    # Like `schools-tool counts | true`: the reader closes before the flush.
+    with subprocess.Popen(
+        [sys.executable, "-m", "schools_tool", "counts"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={**os.environ, "PYTHONPATH": str(SRC)},
+    ) as process:
+        assert process.stdout is not None
+        assert process.stderr is not None
+        process.stdout.close()
+        errors = process.stderr.read()
+        process.wait(timeout=60)
+    assert errors == b""
+    assert process.returncode in (0, 1)
+
+
 def test_counts_writes_csv_files(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

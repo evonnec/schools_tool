@@ -169,10 +169,14 @@ def test_clean_city(raw: str, expected: str) -> None:
 @pytest.mark.parametrize(
     ("city", "key"),
     [
-        ("FT. LAUDERDALE", "FORT LAUDERDALE"),
-        ("MT VERNON", "MOUNT VERNON"),
-        ("ST. MARY'S", "SAINT MARYS"),
-        ("OPA-LOCKA", "OPA LOCKA"),
+        ("FT. LAUDERDALE", "FORTLAUDERDALE"),
+        ("MT VERNON", "MOUNTVERNON"),
+        ("ST. MARY'S", "SAINTMARYS"),
+        ("OPA-LOCKA", "OPALOCKA"),
+        ("LAND O' LAKES", "LANDOLAKES"),
+        ("LAND O'LAKES", "LANDOLAKES"),
+        ("W TERRE HAUTE", "WESTTERREHAUTE"),
+        ("DE KALB", "DEKALB"),
         ("STERLING", "STERLING"),
     ],
 )
@@ -198,6 +202,13 @@ class TestUnifyCitySpellings:
         ]
         assert {school.city for school in unify_city_spellings(schools)} == {
             "SAINT PAUL"
+        }
+        schools = [
+            School("1", "A", "ST. MARY'S", "AK", "1"),
+            School("2", "B", "SAINT MARY'S", "AK", "1"),
+        ]
+        assert {school.city for school in unify_city_spellings(schools)} == {
+            "SAINT MARY'S"
         }
 
     def test_states_are_kept_apart(self) -> None:

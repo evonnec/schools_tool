@@ -7,18 +7,20 @@ Ranking rules, in order:
    the abbreviation or expansion of one ("elementary" finds ELEM). For
    partial credit it also matches words it starts ("highl" finds HIGHLAND).
    A word that matches nothing that way may match a word one typo away
-   ("kuskokwin" finds KUSKOKWIM) for less. A postal code counts only as the
-   last word ("foley high al"), where it means only the state, and
-   connecting words such as "in" and "of" are skipped, so "high school in
-   chicago" means Chicago, not Indiana.
+   ("kuskokwin" finds KUSKOKWIM) for less. A postal code matches the
+   schools in its state ("springfield il elementary"); as the last word it
+   means only the state ("lamar co" is Lamar, Colorado, not LAMAR COUNTY).
+   Connecting words such as "in", "of" and "or" are skipped unless last, so
+   "high school in chicago" means Chicago, not Indiana.
 2. Rare words count for more than common ones, so "foley" decides more than
    "high", and "school", which most names contain, barely counts.
 3. Ties go, in order, to the school whose name has the fewest words the
    query doesn't match; with more query word pairs side by side in its name
    or city ("park forest" fits PARK FOREST, not FOREST PARK); spelled as
-   typed rather than abbreviated (ELEMENTARY over ELEM); with more query
-   words in its name; whose city best matches; with the shorter name;
-   then alphabetically. So HIGHLAND PARK ELEMENTARY SCHOOL comes before
+   typed rather than abbreviated (ELEMENTARY over ELEM); whose city best
+   matches; in a state the query names with a skipped "in" or "or"; with
+   more query words in its name; with the shorter name; then
+   alphabetically. So HIGHLAND PARK ELEMENTARY SCHOOL comes before
    schools located in Highland Park, CALIFORNIA HIGH in San Ramon before SAN
    RAMON VALLEY HIGH in Danville, THE ACADEMY in San Jose before SAN JOSE
    HIGH ACADEMY, and RANCHO CUCAMONGA MIDDLE before CUCAMONGA MIDDLE.
@@ -68,7 +70,7 @@ ABBREVIATIONS = {
 # Query words that only connect others ("high school in chicago"). They are
 # skipped unless the query has nothing else, and don't count against a name
 # that contains them (TOP OF THE KUSKOKWIM SCHOOL).
-STOPWORDS = {"A", "AN", "AND", "AT", "FOR", "IN", "NEAR", "OF", "ON", "THE", "TO"}
+STOPWORDS = {"A", "AN", "AND", "AT", "FOR", "IN", "NEAR", "OF", "ON", "OR", "THE", "TO"}
 
 # Dropped inside words: "MARY'S", "RIVER`S" (10 names use a backtick).
 APOSTROPHES = "'’‘`´ʼ"
@@ -122,6 +124,16 @@ def one_edit_away(word: str) -> set[str]:
     ]
     inserts = [left + char + right for left, right in splits for char in TYPO_ALPHABET]
     return set(deletes + swaps + replaces + inserts) - {word}
+
+
+def index_words(text: str) -> set[str]:
+    """The words to index for text: as tokenize splits it, plus the parts
+    around apostrophes, so "coeur d alene" finds COEUR D'ALENE as well as
+    "coeur d'alene" does."""
+    split = text
+    for apostrophe in APOSTROPHES:
+        split = split.replace(apostrophe, " ")
+    return set(tokenize(text)) | set(tokenize(split))
 
 
 def content_words(text: str) -> tuple[str, ...]:
@@ -211,7 +223,7 @@ class SchoolIndex:
             searchable = (
                 f"{school.name} {school.city} {state_names.get(school.state, '')}"
             )
-            for token in set(tokenize(searchable)):
+            for token in index_words(searchable):
                 self._postings.setdefault(token, []).append(position)
             self._schools_by_state.setdefault(school.state, []).append(position)
 
@@ -237,22 +249,32 @@ class SchoolIndex:
         # For each query word, the indexed tokens it matches and how well
         word_matches: dict[str, dict[str, int]] = {}
         for word in dict.fromkeys(searched):
-            state = self._schools_by_state.get(word) if word == words[-1] else None
-            matches = self._matching_tokens(word)
-            if state:
-                # A trailing postal code means the state: "lamar co" is
-                # Lamar, Colorado, not LAMAR COUNTY.
-                matches = {t: q for t, q in matches.items() if q == EXACT}
+            state = self._schools_by_state.get(word, [])
+            if state and word == words[-1]:
+                # A trailing postal code means only the state: "lamar co" is
+                # Lamar, Colorado, not LAMAR COUNTY or a name with "CO." in it.
+                matches = {}
+            else:
+                # Elsewhere it may also be a word: "jackson co elementary".
+                matches = self._matching_tokens(word)
             word_matches[word] = matches
 
             points_by_position = self._points_by_position(matches)
-            for position in state or []:
+            for position in state:
                 points_by_position[position] = EXACT
             weight = self._rarity(len(points_by_position))
             for position, points in points_by_position.items():
                 scores[position] = scores.get(position, 0) + points * weight
-        word_pairs = list(zip(searched, searched[1:], strict=False))
-        return self._rank(scores, word_matches, word_pairs, limit)
+        word_pairs = list(dict.fromkeys(zip(searched, searched[1:], strict=False)))
+        # A postal code that is also a connecting word isn't scored in the
+        # middle of a query, but still breaks ties toward its state:
+        # "marion in marion high school".
+        state_hints = {
+            word
+            for word in words[:-1]
+            if word in STOPWORDS and word in self._schools_by_state
+        }
+        return self._rank(scores, word_matches, word_pairs, state_hints, limit)
 
     def _points_by_position(self, matches: dict[str, int]) -> dict[int, int]:
         """Points per school for one query word: its best match, unweighted."""
@@ -304,6 +326,7 @@ class SchoolIndex:
         scores: dict[int, int],
         word_matches: dict[str, dict[str, int]],
         word_pairs: list[tuple[str, str]],
+        state_hints: set[str],
         limit: int,
     ) -> list[School]:
         positions_by_score: dict[int, list[int]] = {}
@@ -318,16 +341,17 @@ class SchoolIndex:
 
         def tie_break(
             position: int,
-        ) -> tuple[int, int, int, int, int, int, str, str, str, str]:
+        ) -> tuple[int, int, int, int, bool, int, int, str, str, str, str]:
             school = self.schools[position]
             name_words = self._name_words[position]
             city_words = self._city_words[position]
             return (
                 -(fit.phrases(name_words) + fit.phrases(city_words)),
                 fit.abbreviated(self._distinct_name_words[position]),
-                -fit.matched(name_words),
                 -fit.matched(city_words),
                 fit.unmatched(self._distinct_city_words[position]),
+                school.state not in state_hints,
+                -fit.matched(name_words),
                 len(name_words),
                 school.name,
                 school.city,

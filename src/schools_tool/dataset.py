@@ -35,8 +35,17 @@ MISSING_CITIES = {"N/A"}
 CITY_TRAILING_JUNK = " .,;:'{}"
 
 # Abbreviations that make one city look like several: FT. LAUDERDALE,
-# FT LAUDERDALE and FORT LAUDERDALE.
-CITY_ABBREVIATIONS = {"FT": "FORT", "MT": "MOUNT", "ST": "SAINT"}
+# FT LAUDERDALE and FORT LAUDERDALE; W TERRE HAUTE and WEST TERRE HAUTE.
+CITY_ABBREVIATIONS = {
+    "E": "EAST",
+    "FT": "FORT",
+    "HTS": "HEIGHTS",
+    "MT": "MOUNT",
+    "N": "NORTH",
+    "S": "SOUTH",
+    "ST": "SAINT",
+    "W": "WEST",
+}
 
 
 class School(NamedTuple):
@@ -60,27 +69,29 @@ def clean_city(value: str) -> str:
 
 
 def city_key(city: str) -> str:
-    """The city name with punctuation and abbreviations evened out
-    ("FT. LAUDERDALE" -> "FORT LAUDERDALE")."""
-    words = "".join(
-        char if char.isalnum() else " " for char in city.replace("'", "")
-    ).split()
-    return " ".join(CITY_ABBREVIATIONS.get(word, word) for word in words)
+    """The city name with abbreviations expanded and punctuation and spaces
+    dropped, so spellings of one city compare equal ("FT. LAUDERDALE" ->
+    "FORTLAUDERDALE", "LAND O' LAKES" and "LAND O'LAKES" -> "LANDOLAKES")."""
+    # Drop apostrophes and periods rather than splitting on them, so the S
+    # in MARY'S and the letters of N.A.S. don't read as abbreviations.
+    joined = city.replace("'", "").replace(".", "")
+    words = "".join(char if char.isalnum() else " " for char in joined).split()
+    return "".join(CITY_ABBREVIATIONS.get(word, word) for word in words)
 
 
 def unify_city_spellings(schools: list[School]) -> list[School]:
     """Spell each city the way most of its schools do, so FT. LAUDERDALE,
-    FT LAUDERDALE and FORT LAUDERDALE are one city. Ties go to the full
-    spelling."""
+    FT LAUDERDALE and FORT LAUDERDALE are one city. Ties go to the longer,
+    usually unabbreviated, spelling."""
     spellings: dict[tuple[str, str], dict[str, int]] = {}
     for school in schools:
         counts = spellings.setdefault((city_key(school.city), school.state), {})
         counts[school.city] = counts.get(school.city, 0) + 1
 
     preferred = {}
-    for (key, state), counts in spellings.items():
-        preferred[key, state] = max(
-            counts, key=lambda spelling: (counts[spelling], spelling == key, spelling)
+    for group, counts in spellings.items():
+        preferred[group] = max(
+            counts, key=lambda spelling: (counts[spelling], len(spelling), spelling)
         )
     return [
         school._replace(city=preferred[city_key(school.city), school.state])

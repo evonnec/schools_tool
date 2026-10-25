@@ -51,7 +51,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        return run(parser, args)
+        status = run(parser, args)
+        # Flush here so a reader that has already gone is caught below,
+        # not reported by the interpreter at exit.
+        sys.stdout.flush()
+        return status
     except BrokenPipeError:
         # The reader went away (e.g. `| head`). Point stdout at devnull so
         # the flush at exit doesn't raise again, as the Python docs advise.

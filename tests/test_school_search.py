@@ -154,7 +154,7 @@ class TestMatching:
         )
         assert index.search("foley foley foley high") == index.search("foley high")
 
-    def test_postal_code_counts_only_as_the_last_word(self) -> None:
+    def test_in_is_a_connecting_word_except_at_the_end(self) -> None:
         index = build_index(
             ("WEST SIDE HIGH SCHOOL", "EAST CHICAGO", "IN"),
             ("AMUNDSEN HIGH SCHOOL", "CHICAGO", "IL"),
@@ -162,13 +162,45 @@ class TestMatching:
         assert index.search("high school in chicago")[0].state == "IL"
         assert index.search("high school chicago in")[0].state == "IN"
 
+    def test_a_skipped_postal_code_still_breaks_ties(self) -> None:
+        index = build_index(
+            ("MARION HIGH SCHOOL", "MARION", "AL"),
+            ("MARION HIGH SCHOOL", "MARION", "IN"),
+        )
+        assert index.search("marion in marion high school")[0].state == "IN"
+
+    def test_postal_code_in_the_middle_means_the_state(self) -> None:
+        index = build_index(
+            ("IL MATHEMATICS ACADEMY", "AURORA", "IL"),
+            ("LINCOLN ELEMENTARY", "SPRINGFIELD", "MO"),
+            ("BUTLER ELEMENTARY", "SPRINGFIELD", "IL"),
+        )
+        assert index.search("springfield il elementary")[0].name == "BUTLER ELEMENTARY"
+
     def test_trailing_postal_code_means_only_the_state(self) -> None:
         index = build_index(
             ("LAMAR COUNTY MIDDLE SCHOOL", "BARNESVILLE", "GA"),
             ("LAMAR MIDDLE SCHOOL", "LAMAR", "CO"),
+            ("EAST CO HIGH", "LEPANTO", "AR"),
+            ("EAST HIGH SCHOOL", "DENVER", "CO"),
+            ("STATE LINE ELEMENTARY", "NEW PINE CREEK", "OR"),
+            ("SURVIVORS OR NORTH BROWARD", "MIAMI", "FL"),
         )
         assert index.search("lamar middle school lamar co")[0].state == "CO"
         assert index.search("lamar co middle school")[0].state == "GA"
+        # EAST CO HIGH would win on its name if "co" also matched name words
+        assert index.search("east high co")[0].city == "DENVER"
+        assert lines(index.search("or")) == [
+            "STATE LINE ELEMENTARY, NEW PINE CREEK, OR"
+        ]
+
+    def test_words_around_apostrophes_match_both_ways(self) -> None:
+        index = build_index(
+            ("COEUR D'ALENE HIGH SCHOOL", "COEUR D'ALENE", "ID"),
+            ("PINE SCHOOL", "MESA", "AZ"),
+        )
+        assert index.search("coeur d alene high")[0].name == "COEUR D'ALENE HIGH SCHOOL"
+        assert index.search("coeur d'alene high")[0].name == "COEUR D'ALENE HIGH SCHOOL"
 
     def test_connecting_words_are_skipped(self) -> None:
         index = build_index(
@@ -300,6 +332,13 @@ class TestRanking:
             ("CALIFORNIA HIGH", "SAN RAMON", "CA"),
         )
         assert index.search("california high san ramon")[0].name == "CALIFORNIA HIGH"
+
+    def test_school_in_the_named_city_beats_a_name_echoing_it(self) -> None:
+        index = build_index(
+            ("DEL PUEBLO ELEMENTARY SCHOOL", "DENVER", "CO"),
+            ("BELMONT ELEMENTARY SCHOOL", "PUEBLO", "CO"),
+        )
+        assert index.search("pueblo co elementary")[0].city == "PUEBLO"
 
     def test_city_words_repeated_in_a_name_do_not_win_ties(self) -> None:
         index = build_index(
@@ -436,12 +475,21 @@ class TestReadmeCases:
             timings.append(time.perf_counter() - start)
         assert min(timings) < 0.025
 
-    @pytest.mark.parametrize("query", ["school", "elementary", "high school"])
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "school",
+            "elementary",
+            "high school",
+            "elementary school",
+            "school elementary " * 100,
+        ],
+    )
     def test_common_word_queries_run_under_200ms(
         self, bundled_index: SchoolIndex, query: str
     ) -> None:
-        # The slowest realistic queries: a word most schools share. Best of
-        # three, so a busy machine doesn't fail the test.
+        # The slowest queries: words most schools share, even repeated many
+        # times. Best of three, so a busy machine doesn't fail the test.
         timings = []
         for _ in range(3):
             start = time.perf_counter()
