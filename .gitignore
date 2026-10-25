@@ -137,3 +137,5 @@ dmypy.json
 
 
 .ipynb_checkpoints/
+# Reports written by `schools-tool counts --output-dir output`
+/output/

@@ -1,193 +1,258 @@
-#!/usr/bin/env python3
+"""Part 2: find schools by name, city, and state from a plain-text query.
 
-import csv
+Ranking rules, in order:
+
+1. Each query word scores the schools it matches. A word matches a school
+   when it equals a word in the school's name, city, or state (name or postal
+   code); for slightly less when it is the abbreviation or expansion of one
+   ("elementary" finds ELEM); and for partial credit when it starts a longer
+   word ("highl" finds HIGHLAND). A word that matches nothing that way may
+   match a word one typo away ("kuskokwin" finds KUSKOKWIM) for less.
+2. Rare words count for more than common ones, so "foley" decides more than
+   "high", and "school", which most names contain, barely counts.
+3. Ties go to the school whose name is closest to the query (most words in
+   common, fewest words not in common), then whose city is, then to shorter
+   names, then alphabetically. HIGHLAND PARK ELEMENTARY SCHOOL comes before
+   an elementary school that is only located in Highland Park, and RANCHO
+   CUCAMONGA MIDDLE before CUCAMONGA MIDDLE in Rancho Cucamonga.
+4. Results with the same name, city, and state are shown once.
+"""
+
 import time
 
-_DATAFRAMES: list[list[str]] | None = None
+from schools_tool.dataset import School, load_schools, load_state_names
+
+RESULT_LIMIT = 3
+
+# Points for each kind of match, multiplied by how rare the query word is.
+EXACT = 10
+ABBREVIATION = 9
+PREFIX = 6
+TYPO = 5
+
+# Words shorter than these are matched exactly only; "in" should not match
+# every word that starts with "in".
+MIN_PREFIX_LENGTH = 3
+MIN_TYPO_LENGTH = 4
+
+# Abbreviations common in school names (2,229 names say ELEM). A query word
+# matches both the word as written and its abbreviation or expansion, so
+# "elementary" finds ELEM and "elem" finds ELEMENTARY.
+ABBREVIATIONS = {
+    "ACAD": ("ACADEMY",),
+    "CTR": ("CENTER",),
+    "ELEM": ("ELEMENTARY",),
+    "FT": ("FORT",),
+    "HS": ("HIGH", "SCHOOL"),
+    "HTS": ("HEIGHTS",),
+    "JR": ("JUNIOR",),
+    "MID": ("MIDDLE",),
+    "MT": ("MOUNT",),
+    "SCH": ("SCHOOL",),
+    "SCHL": ("SCHOOL",),
+    "SR": ("SENIOR",),
+}
+
+TYPO_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 
-def get_school_data_dataframes(
-    state_to_abbreviation_map: dict[str, str],
-) -> list[list[str]]:
+def abbreviation_equivalents() -> dict[str, list[str]]:
+    """Map each abbreviation to its words and each word to its abbreviations."""
+    equivalents: dict[str, list[str]] = {}
+    for abbreviation, words in ABBREVIATIONS.items():
+        for word in words:
+            equivalents.setdefault(abbreviation, []).append(word)
+            equivalents.setdefault(word, []).append(abbreviation)
+    return equivalents
+
+
+EQUIVALENTS = abbreviation_equivalents()
+
+
+def tokenize(text: str) -> list[str]:
+    """Split text into upper-case words of letters and digits.
+
+    Apostrophes are dropped ("MARY'S" -> "MARYS") and other punctuation
+    separates words ("COLLINS-RIVERSIDE" -> "COLLINS", "RIVERSIDE").
     """
-    Take the csv and return a list of lists dataframe
-    """
-    global _DATAFRAMES
-    if _DATAFRAMES is None:
-        input_file = "./input/school_data.csv"
-        school_df: list[list[str]] = []
-        header = None
-        with open(input_file, encoding="iso-8859-1") as schools_input_file:
-            csvreader = csv.reader(schools_input_file, delimiter=",")
-            for row in csvreader:
-                if header is None:
-                    header = row
-                else:
-                    [
-                        school_id,
-                        agency_id,
-                        operating_agency_name,
-                        school_name,
-                        city_name,
-                        state,
-                        latitude,
-                        longitude,
-                        metro_centric_locale,
-                        urban_centric_locale,
-                        school_status_code,
-                    ] = row
-                    # if state in state_to_abbreviation_map:
-                    #     full_state_name = state_to_abbreviation_map[state]
-                    # else:
-                    #     full_state_name = ''
-                    school_df.append([school_name, city_name, state])
-            _DATAFRAMES = school_df
-            return school_df
-    else:
-        return _DATAFRAMES
+    without_apostrophes = text.upper().replace("'", "").replace("’", "")
+    spaced = "".join(char if char.isalnum() else " " for char in without_apostrophes)
+    return spaced.split()
 
 
-def map_abbreviation_to_state(
-    abbr_file: str = "./input/name-abbr.csv",
-) -> dict[str, str]:
-    """
-    A map of state abbreviations to the state name is needed
-    Found a csv from webpage, but libraries not allowed but csv is
-    Load the map and return map
-    """
-    header, map_state = None, dict()
-    with open(abbr_file) as map_state_file:
-        csvreader = csv.reader(map_state_file, delimiter=",")
-        for row in csvreader:
-            if header is None:
-                header = row
-            else:
-                [state_name, _, state_code] = row
-                map_state.update({state_code.upper(): state_name.upper()})
-        return map_state
-
-
-def is_word_in_dataframe_row(
-    dataframe_row: list[str], word: str, state_to_abbreviation_map: dict[str, str]
-) -> bool:
-    """
-    Determine if the search term word is in the dataframe row
-    """
-    [school_name, city_name, state] = dataframe_row
-    if state in state_to_abbreviation_map:
-        full_state_name = state_to_abbreviation_map[state]
-        search_fields = [school_name, city_name, full_state_name]
-    else:
-        search_fields = [school_name, city_name]
-
-    is_match = False
-    for search_field in search_fields:
-        if word.upper() in search_field.upper():
-            is_match = True
-    return is_match
-
-
-def search_full_search_term_within_dataframe(
-    dataframe: list[list[str]],
-    full_search_term: str,
-    state_to_abbreviation_map: dict[str, str],
-) -> list[list[str]]:
-    """
-    ranking assigned to school-city-state if all search terms are found, if n - 1 search terms are found, et al.
-    this is slower than returning all search terms in school-city-state which was attempted
-    """
-    words_in_term = full_search_term.split()
-
-    dataframe_scores: dict[int, float] = {}
-
-    for word in words_in_term:
-        for index, row in enumerate(dataframe):
-            if index not in dataframe_scores:
-                dataframe_scores[index] = 0
-
-            if is_word_in_dataframe_row(
-                dataframe_row=row,
-                word=word,
-                state_to_abbreviation_map=state_to_abbreviation_map,
-            ):
-                # All items are schools, and allowing "school" to give a full
-                # score point means we miss great matches.
-                # Half a point is arbitrary.
-                if word.lower() == "school":
-                    dataframe_scores[index] = dataframe_scores[index] + 0.5
-                else:
-                    dataframe_scores[index] = dataframe_scores[index] + 1
-
-    sorted_schools_by_rank = sorted(
-        dataframe_scores.keys(), key=lambda index: dataframe_scores[index], reverse=True
-    )
-    top_results = [
-        dataframe[index] for index in sorted_schools_by_rank if dataframe_scores[index]
+def one_edit_away(word: str) -> set[str]:
+    """Every string one deletion, swap, replacement, or insertion from word."""
+    splits = [(word[:i], word[i:]) for i in range(len(word) + 1)]
+    deletes = [left + right[1:] for left, right in splits if right]
+    swaps = [
+        left + right[1] + right[0] + right[2:]
+        for left, right in splits
+        if len(right) > 1
     ]
-    return top_results
+    replaces = [
+        left + char + right[1:]
+        for left, right in splits
+        if right
+        for char in TYPO_ALPHABET
+    ]
+    inserts = [left + char + right for left, right in splits for char in TYPO_ALPHABET]
+    return set(deletes + swaps + replaces + inserts) - {word}
 
 
-def format_result(dataframe_item: list[str]) -> str:
+class SchoolIndex:
+    """An inverted index over schools, built once so each search is fast."""
+
+    def __init__(self, schools: list[School], state_names: dict[str, str]) -> None:
+        self.schools = schools
+        self._name_tokens = [set(tokenize(school.name)) for school in schools]
+        self._city_tokens = [set(tokenize(school.city)) for school in schools]
+
+        # token -> positions in self.schools of the schools containing it
+        self._postings: dict[str, list[int]] = {}
+        for position, school in enumerate(schools):
+            searchable = f"{school.name} {school.city} {state_names.get(school.state, '')} {school.state}"
+            for token in set(tokenize(searchable)):
+                self._postings.setdefault(token, []).append(position)
+
+        # prefix -> longer tokens that start with it
+        self._completions: dict[str, list[str]] = {}
+        for token in self._postings:
+            for end in range(MIN_PREFIX_LENGTH, len(token)):
+                self._completions.setdefault(token[:end], []).append(token)
+
+    def search(self, query: str, limit: int = RESULT_LIMIT) -> list[School]:
+        if limit < 1:
+            return []
+        scores: dict[int, int] = {}
+        # For each query word, the indexed tokens it matches and how well
+        word_matches: list[dict[str, int]] = []
+        for word in dict.fromkeys(tokenize(query)):
+            matches = self._matching_tokens(word)
+            word_matches.append(matches)
+
+            quality_by_position: dict[int, int] = {}
+            for token, quality in matches.items():
+                for position in self._postings[token]:
+                    if quality_by_position.get(position, 0) < quality:
+                        quality_by_position[position] = quality
+            weight = self._rarity(len(quality_by_position))
+            for position, quality in quality_by_position.items():
+                scores[position] = scores.get(position, 0) + quality * weight
+        return self._rank(scores, word_matches, limit)
+
+    def _matching_tokens(self, word: str) -> dict[str, int]:
+        """The indexed tokens a query word matches, with the best quality of each."""
+        candidates = []
+        if word in self._postings:
+            candidates.append((word, EXACT))
+        candidates.extend(
+            (token, ABBREVIATION)
+            for token in EQUIVALENTS.get(word, [])
+            if token in self._postings
+        )
+        if len(word) >= MIN_PREFIX_LENGTH:
+            candidates.extend(
+                (token, PREFIX) for token in self._completions.get(word, [])
+            )
+        if not candidates and len(word) >= MIN_TYPO_LENGTH:
+            candidates.extend(
+                (token, TYPO)
+                for token in one_edit_away(word)
+                if token in self._postings
+            )
+
+        matches: dict[str, int] = {}
+        for token, quality in candidates:
+            matches[token] = max(quality, matches.get(token, 0))
+        return matches
+
+    def _rarity(self, matching_schools: int) -> int:
+        """Roughly log2 of how rare a word is: one more point each time it is
+        half as common. A word in every school scores 1."""
+        if not matching_schools:
+            return 0
+        return (len(self.schools) // matching_schools).bit_length()
+
+    def _rank(
+        self, scores: dict[int, int], word_matches: list[dict[str, int]], limit: int
+    ) -> list[School]:
+        positions_by_score: dict[int, list[int]] = {}
+        for position, score in scores.items():
+            positions_by_score.setdefault(score, []).append(position)
+
+        def similarity(tokens: set[str]) -> float:
+            """Jaccard similarity of the query words and these words: matches
+            over all distinct words, with partial matches counting partly."""
+            matched = (
+                sum(
+                    max((matches.get(token, 0) for token in tokens), default=0)
+                    for matches in word_matches
+                )
+                / EXACT
+            )
+            return matched / (len(word_matches) + len(tokens) - matched)
+
+        def tie_break(position: int) -> tuple[float, float, int, str, str, str, str]:
+            school = self.schools[position]
+            return (
+                -similarity(self._name_tokens[position]),
+                -similarity(self._city_tokens[position]),
+                len(self._name_tokens[position]),
+                school.name,
+                school.city,
+                school.state,
+                school.school_id,
+            )
+
+        results: list[School] = []
+        shown = set()
+        for score in sorted(positions_by_score, reverse=True):
+            for position in sorted(positions_by_score[score], key=tie_break):
+                school = self.schools[position]
+                line = (school.name, school.city, school.state)
+                if line in shown:
+                    continue
+                shown.add(line)
+                results.append(school)
+                if len(results) == limit:
+                    return results
+        return results
+
+
+_default_index: SchoolIndex | None = None
+
+
+def default_index() -> SchoolIndex:
+    """The index over the bundled dataset, built on first use."""
+    global _default_index
+    if _default_index is None:
+        _default_index = SchoolIndex(load_schools(), load_state_names())
+    return _default_index
+
+
+def format_results(query: str, results: list[School], seconds: float) -> str:
+    """Results in the format the README shows."""
+    lines = [f'Results for "{query}" (search took: {seconds:.3f}s)']
+    for rank, school in enumerate(results, start=1):
+        lines.append(f"{rank}. {school.name}")
+        lines.append(f"{school.city}, {school.state}")
+    if not results:
+        lines.append("No matching schools.")
+    return "\n".join(lines)
+
+
+def search_schools(
+    query: str, index: SchoolIndex | None = None, limit: int = RESULT_LIMIT
+) -> list[School]:
+    """Print and return the top matches for query.
+
+    The index is built before the timer starts: the README allows loading and
+    processing up front, and the reported time is the search alone.
     """
-    Returns a string which looks like README strings
-    """
-    [school_name, city_name, state] = dataframe_item
-    string_to_return = school_name + "\n" + city_name + ", " + state
-    return string_to_return
-
-
-def search_school_results(full_search_term: str) -> list[list[str]]:
-    """
-    Returns formatted results search_schools
-    """
-    time_to_make_map_abbrv_start = time.perf_counter_ns()
-    state_to_abbreviation_map = map_abbreviation_to_state()
-    time_to_make_map_abbrv_end = time.perf_counter_ns()
-    time_to_make_map_abbrv = (
-        time_to_make_map_abbrv_end - time_to_make_map_abbrv_start
-    ) / 1000000000
-
-    time_to_get_dataframes_start = time.perf_counter_ns()
-    dataframe_without_headings = get_school_data_dataframes(state_to_abbreviation_map)
-    time_to_get_dataframes_end = time.perf_counter_ns()
-    time_to_get_dataframes = (
-        time_to_get_dataframes_end - time_to_get_dataframes_start
-    ) / 1000000000
-
-    time_to_search_start = time.perf_counter_ns()
-    search_results = search_full_search_term_within_dataframe(
-        full_search_term=full_search_term,
-        dataframe=dataframe_without_headings,
-        state_to_abbreviation_map=state_to_abbreviation_map,
-    )
-    time_to_search_end = time.perf_counter_ns()
-    time_to_search = (time_to_search_end - time_to_search_start) / 1000000000
-
-    print("time_to_make_map_abbrv", time_to_make_map_abbrv)
-    print("time_to_get_dataframes", time_to_get_dataframes)
-    print("time_to_search", time_to_search)
-
-    return search_results
-
-
-def search_schools(full_search_term: str) -> None:
-    """
-    search_schools function described in README return printed results
-    """
-    position = 1
-    start = time.perf_counter_ns()
-    formatted_results = search_school_results(full_search_term)
-    end = time.perf_counter_ns()
-    execution_time = (end - start) / 1000000000
-    print(
-        'Results for "'
-        + full_search_term
-        + '" (search took: '
-        + str(execution_time)
-        + "s)"
-    )
-    for search_result in formatted_results[:3]:
-        formatted_result = format_result(search_result)
-        ready_to_print = str(position) + ". " + formatted_result
-        position += 1
-        print(ready_to_print)
+    if index is None:
+        index = default_index()
+    start = time.perf_counter()
+    results = index.search(query, limit)
+    elapsed = time.perf_counter() - start
+    print(format_results(query, results, elapsed))
+    return results

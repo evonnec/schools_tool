@@ -1,104 +1,131 @@
-#!/usr/bin/env python3
+"""Part 1: counts over the school dataset."""
 
 import csv
+from collections.abc import Callable, Iterable
+from pathlib import Path
+
+from schools_tool.dataset import School, load_schools
+
+# A city is a (city name, state) pair: SPRINGFIELD, IL and SPRINGFIELD, CO are
+# different cities.
+City = tuple[str, str]
 
 
-def get_df(input_file: str = "./input/school_data.csv") -> list[list[str]]:
-    """
-    Retrieves the csv school_data
-    """
-    school_df: list[list[str]] = []
-    header = None
-    with open(input_file, encoding="iso-8859-1") as schools_input_file:
-        csvreader = csv.reader(schools_input_file, delimiter=",")
-        for row in csvreader:
-            if header is None:
-                header = row
-            else:
-                [_, _, _, _, _, _, _, _, _, _, _] = row
-                school_df.append(row)
-        return school_df
+def count_by[K](schools: Iterable[School], key: Callable[[School], K]) -> dict[K, int]:
+    counts: dict[K, int] = {}
+    for school in schools:
+        group = key(school)
+        counts[group] = counts.get(group, 0) + 1
+    return counts
 
 
-def total_school_count(df: list[list[str]]) -> int:
-    """
-    Returns total number of schools
-    """
-    total_schools = set()
-    for entry in df:
-        [school_id, _, _, _, _, _, _, _, _, _, _] = entry
-        total_schools.add(school_id)
-    return len(total_schools)
+def total_school_count(schools: Iterable[School]) -> int:
+    return len({school.school_id for school in schools})
 
 
-def schools_per_state_count(df: list[list[str]]) -> dict[str, dict[str, int]]:
-    """
-    Returns dictionary of states and number of schools in each state
-    """
-    schools_per_state: dict[str, dict[str, int]] = dict()
-    for entry in df:
-        [_, _, _, _, _, state, _, _, _, _, _] = entry
-        if state not in schools_per_state:
-            # C should be DC, line 18711, perhaps there should be something to handle this error
-            schools_per_state[state] = {"school_count": 1}
-        else:
-            schools_per_state[state]["school_count"] += 1
-    return schools_per_state
+def schools_per_state(schools: Iterable[School]) -> dict[str, int]:
+    return count_by(schools, lambda school: school.state)
 
 
-def schools_per_metro_count(df: list[list[str]]) -> dict[str, dict[str, int]]:
-    """
-    Returns number of schools per metro ID
-    """
-    schools_per_metro: dict[str, dict[str, int]] = dict()
-    for entry in df:
-        [_, _, _, _, _, _, _, _, metro_centric_locale, _, _] = entry
-        if metro_centric_locale not in schools_per_metro:
-            # N pertains to AL and FL, 1097 in total -- there ought to be something to handle this
-            schools_per_metro[metro_centric_locale] = {"school_count": 1}
-        else:
-            schools_per_metro[metro_centric_locale]["school_count"] += 1
-    return schools_per_metro
+def schools_per_metro_locale(schools: Iterable[School]) -> dict[str, int]:
+    """Schools per metro-centric locale code; "N" means no locale assigned."""
+    return count_by(schools, lambda school: school.metro_locale)
 
 
-def schools_per_city_count(df: list[list[str]]) -> list[tuple[str, dict[str, int]]]:
-    """
-    Returns number of schools per city in ranked order
-    """
-    schools_per_city: dict[str, dict[str, int]] = dict()
-    for entry in df:
-        [_, _, _, _, city_name, state, _, _, _, _, _] = entry
-        city = f"{city_name}|{state}".lower()
-        if city not in schools_per_city:
-            schools_per_city[city] = {"school_count": 1}
-        else:
-            schools_per_city[city]["school_count"] += 1
-    sorted_schools_per_city = sorted(
-        schools_per_city.items(), key=lambda x: x[1]["school_count"], reverse=True
-    )
-    return sorted_schools_per_city
+def schools_per_city(schools: Iterable[School]) -> dict[City, int]:
+    return count_by(schools, lambda school: (school.city, school.state))
 
 
-def format_result(dictionary_list: dict[str, dict[str, int]]) -> str:
-    """
-    Returns a string which looks like README strings
-    """
-    string_to_return = ""
-    for the_key, the_item in dictionary_list.items():
-        string_to_return = (
-            string_to_return + str(the_key) + " : " + str(the_item) + "\n"
+def cities_with_most_schools(schools: Iterable[School]) -> tuple[list[City], int]:
+    """Every city tied for the most schools, alphabetically, and that count."""
+    per_city = schools_per_city(schools)
+    if not per_city:
+        return [], 0
+    most = max(per_city.values())
+    return sorted(city for city, count in per_city.items() if count == most), most
+
+
+def unique_city_count(schools: Iterable[School]) -> int:
+    return len(schools_per_city(schools))
+
+
+def format_city(city: City) -> str:
+    name, state = city
+    return f"{name}, {state}"
+
+
+def format_counts(schools: list[School]) -> str:
+    """The Part 1 report in the format the README shows."""
+    lines = [f"Total Schools: {total_school_count(schools)}", "Schools by State:"]
+    for state, count in sorted(schools_per_state(schools).items()):
+        lines.append(f"{state}: {count}")
+
+    lines.append("Schools by Metro-centric locale:")
+    for locale, count in sorted(schools_per_metro_locale(schools).items()):
+        lines.append(f"{locale}: {count}")
+
+    cities, most = cities_with_most_schools(schools)
+    if not cities:
+        lines.append("City with most schools: none")
+    elif len(cities) == 1:
+        lines.append(
+            f"City with most schools: {format_city(cities[0])} ({most} schools)"
         )
+    else:
+        tied = "; ".join(format_city(city) for city in cities)
+        lines.append(f"Cities with most schools: {tied} ({most} schools each)")
 
-    return string_to_return
-
-
-def print_counts() -> None:
-    print(f"total schools:\n{total_school_count(get_df())}\n")
-    print(
-        f"schools per state count:\n{format_result(schools_per_state_count(get_df()))}\n"
+    lines.append(
+        f"Unique cities with at least one school: {unique_city_count(schools)}"
     )
-    print(f"schools per metro:\n{format_result(schools_per_metro_count(get_df()))}\n")
-    print(f"city with most schools count:\n{schools_per_city_count(get_df())[0]}\n")
-    print(
-        f"number of unique cities with one school or more:\n{len(schools_per_city_count(get_df()))}\n"
+    return "\n".join(lines)
+
+
+def print_counts(schools: list[School] | None = None) -> None:
+    """Print the Part 1 report, loading the bundled dataset by default."""
+    if schools is None:
+        schools = load_schools()
+    print(format_counts(schools))
+
+
+def write_counts(schools: list[School], output_dir: Path) -> list[Path]:
+    """Write the counts as CSV files in output_dir and return their paths."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cities, most = cities_with_most_schools(schools)
+    # Most schools first, then alphabetically
+    city_rows = sorted(
+        (
+            (city, state, count)
+            for (city, state), count in schools_per_city(schools).items()
+        ),
+        key=lambda row: (-row[2], row[0], row[1]),
     )
+    tables: dict[str, tuple[list[str], list[tuple[object, ...]]]] = {
+        "summary.csv": (
+            ["metric", "value"],
+            [
+                ("total_schools", total_school_count(schools)),
+                ("unique_cities", unique_city_count(schools)),
+                ("most_schools_in_a_city", most),
+                ("cities_with_most_schools", "; ".join(map(format_city, cities))),
+            ],
+        ),
+        "schools_by_state.csv": (
+            ["state", "school_count"],
+            sorted(schools_per_state(schools).items()),
+        ),
+        "schools_by_metro_locale.csv": (
+            ["metro_locale", "school_count"],
+            sorted(schools_per_metro_locale(schools).items()),
+        ),
+        "schools_by_city.csv": (["city", "state", "school_count"], list(city_rows)),
+    }
+    written = []
+    for file_name, (header, rows) in tables.items():
+        path = output_dir / file_name
+        with path.open("w", encoding="utf-8", newline="") as output_file:
+            writer = csv.writer(output_file)
+            writer.writerow(header)
+            writer.writerows(rows)
+        written.append(path)
+    return written
