@@ -8,6 +8,8 @@ from pathlib import Path
 import pytest
 
 from schools_tool.cli import main
+from schools_tool.count_schools import format_counts
+from schools_tool.dataset import School
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 
@@ -15,10 +17,56 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 WriteCsv = Callable[[list[tuple[str, str, str, str, str]]], Path]
 
 
-def test_counts(capsys: pytest.CaptureFixture[str]) -> None:
+def test_counts(
+    bundled_schools: list[School], capsys: pytest.CaptureFixture[str]
+) -> None:
     assert main(["counts"]) == 0
-    out = capsys.readouterr().out
-    assert out.startswith("Total Schools: 34779\n")
+    assert capsys.readouterr().out == format_counts(bundled_schools) + "\n"
+
+
+def test_output_dir_that_is_a_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    not_a_dir = tmp_path / "report.txt"
+    not_a_dir.write_text("")
+    with pytest.raises(SystemExit) as exit_info:
+        main(["counts", "--output-dir", str(not_a_dir)])
+    assert exit_info.value.code == 2
+    captured = capsys.readouterr()
+    assert "cannot write to --output-dir" in captured.err
+    assert captured.out == ""
+
+
+def test_csv_parser_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    path = tmp_path / "huge.csv"
+    path.write_text(
+        "NCESSCH,SCHNAM05,LCITY05,LSTATE05,MLOCALE\n" + f'1,"{"X" * 200_000}",A,CO,1\n'
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        main(["--data", str(path), "counts"])
+    assert exit_info.value.code == 2
+    assert "huge.csv, line" in capsys.readouterr().err
+
+
+def test_closed_pipe_exits_quietly() -> None:
+    with subprocess.Popen(
+        [sys.executable, "-m", "schools_tool", "search"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env={**os.environ, "PYTHONPATH": str(SRC)},
+    ) as process:
+        assert process.stdin is not None
+        assert process.stdout is not None
+        assert process.stderr is not None
+        process.stdin.write(b"foley high alabama\n" * 2000)
+        process.stdin.close()
+        process.stdout.readline()
+        process.stdout.close()  # like `| head -1`
+        errors = process.stderr.read()
+        process.wait(timeout=60)
+    assert b"Traceback" not in errors
+    assert process.returncode == 1
 
 
 def test_counts_writes_csv_files(

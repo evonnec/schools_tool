@@ -23,11 +23,20 @@ REQUIRED_COLUMNS = (SCHOOL_ID, SCHOOL_NAME, CITY, STATE, METRO_LOCALE)
 # Known bad values in the source file. NCESSCH 110003000297 (PRE-K INCENTIVE
 # PROGRAM, WASHINGTON) has state "C"; its district, 1100030, is in DC.
 STATE_CORRECTIONS = {"C": "DC"}
+# NCESSCH 050550000260 (CENTRAL ELEMENTARY SCHOOL) has city "\\UMAS"; its
+# district, DUMAS, and every other school in it are in DUMAS.
+CITY_CORRECTIONS = {"050550000260": "DUMAS"}
+# City values that mean the city is unknown.
+MISSING_CITIES = {"N/A"}
 
-# Fourteen city values end in stray characters or repeat the state
-# ("BRADENTON,", "VOLUSIA COUNTY{", "TUCSON, AZ"). Uncleaned, twelve of them
-# would count as cities separate from the one they belong to.
+# 32 city values add a state or ZIP after a comma ("TUCSON, AZ", "LITTLE
+# ROCK, AR  72205", "CAMP VERDE, ARIZONA") or end in stray characters
+# ("BRADENTON,", "VOLUSIA COUNTY{"). No city name in the file needs a comma.
 CITY_TRAILING_JUNK = " .,;:'{}"
+
+# Abbreviations that make one city look like several: FT. LAUDERDALE,
+# FT LAUDERDALE and FORT LAUDERDALE.
+CITY_ABBREVIATIONS = {"FT": "FORT", "MT": "MOUNT", "ST": "SAINT"}
 
 
 class School(NamedTuple):
@@ -43,52 +52,91 @@ def clean(value: str) -> str:
     return " ".join(value.upper().split())
 
 
-def clean_city(value: str, state: str) -> str:
-    """Drop stray trailing punctuation and a repeated state ("NEWNAN, GA." -> "NEWNAN")."""
-    city = clean(value).rstrip(CITY_TRAILING_JUNK)
-    state_suffix = f", {state}"
-    if city.endswith(state_suffix):
-        city = city.removesuffix(state_suffix)
-    return city
+def clean_city(value: str) -> str:
+    """Drop anything after a comma and stray trailing characters
+    ("LITTLE ROCK, AR  72205" -> "LITTLE ROCK", "BRADENTON," -> "BRADENTON")."""
+    city = clean(value).split(",")[0].rstrip(CITY_TRAILING_JUNK)
+    return "" if city in MISSING_CITIES else city
+
+
+def city_key(city: str) -> str:
+    """The city name with punctuation and abbreviations evened out
+    ("FT. LAUDERDALE" -> "FORT LAUDERDALE")."""
+    words = "".join(
+        char if char.isalnum() else " " for char in city.replace("'", "")
+    ).split()
+    return " ".join(CITY_ABBREVIATIONS.get(word, word) for word in words)
+
+
+def unify_city_spellings(schools: list[School]) -> list[School]:
+    """Spell each city the way most of its schools do, so FT. LAUDERDALE,
+    FT LAUDERDALE and FORT LAUDERDALE are one city. Ties go to the full
+    spelling."""
+    spellings: dict[tuple[str, str], dict[str, int]] = {}
+    for school in schools:
+        counts = spellings.setdefault((city_key(school.city), school.state), {})
+        counts[school.city] = counts.get(school.city, 0) + 1
+
+    preferred = {}
+    for (key, state), counts in spellings.items():
+        preferred[key, state] = max(
+            counts, key=lambda spelling: (counts[spelling], spelling == key, spelling)
+        )
+    return [
+        school._replace(city=preferred[city_key(school.city), school.state])
+        for school in schools
+    ]
 
 
 def load_schools(path: str | Path = SCHOOL_DATA_CSV) -> list[School]:
-    """Read the school file into one School per school ID.
+    """Read the school file into one cleaned School per school ID.
 
-    Raises ValueError if a required column is missing or a row is short, so a
-    malformed file fails loudly instead of being counted wrong. Rows that
-    repeat an earlier school ID are dropped.
+    Raises ValueError, naming the file and line where it can, if the file is
+    not Windows-1252 CSV, lacks a required column, or has a short row or a
+    blank school ID, so a malformed file fails loudly instead of being
+    counted wrong. A row that repeats an earlier school ID is dropped.
     """
-    schools = []
-    seen_ids = set()
     with open(path, encoding=SCHOOL_DATA_ENCODING, newline="") as school_file:
         reader = csv.DictReader(school_file)
-        missing = [
-            name for name in REQUIRED_COLUMNS if name not in (reader.fieldnames or [])
-        ]
-        if missing:
-            raise ValueError(f"{path}: missing columns {', '.join(missing)}")
+        try:
+            schools = read_schools(reader, path)
+        except UnicodeDecodeError as error:
+            raise ValueError(
+                f"{path}: not Windows-1252 text ({error.reason})"
+            ) from error
+        except csv.Error as error:
+            raise ValueError(f"{path}, line {reader.line_num}: {error}") from error
+    return unify_city_spellings(schools)
 
-        for row in reader:
-            if any(row[name] is None for name in REQUIRED_COLUMNS):
-                raise ValueError(
-                    f"{path}, line {reader.line_num}: row has too few columns"
-                )
-            school_id = row[SCHOOL_ID].strip()
-            if school_id in seen_ids:
-                continue
-            seen_ids.add(school_id)
-            state = clean(row[STATE])
-            state = STATE_CORRECTIONS.get(state, state)
-            schools.append(
-                School(
-                    school_id=school_id,
-                    name=clean(row[SCHOOL_NAME]),
-                    city=clean_city(row[CITY], state),
-                    state=state,
-                    metro_locale=clean(row[METRO_LOCALE]),
-                )
+
+def read_schools(reader: csv.DictReader[str], path: str | Path) -> list[School]:
+    missing = [
+        name for name in REQUIRED_COLUMNS if name not in (reader.fieldnames or [])
+    ]
+    if missing:
+        raise ValueError(f"{path}: missing columns {', '.join(missing)}")
+
+    schools = []
+    seen_ids = set()
+    for row in reader:
+        if any(row[name] is None for name in REQUIRED_COLUMNS):
+            raise ValueError(f"{path}, line {reader.line_num}: row has too few columns")
+        school_id = row[SCHOOL_ID].strip()
+        if not school_id:
+            raise ValueError(f"{path}, line {reader.line_num}: blank {SCHOOL_ID}")
+        if school_id in seen_ids:
+            continue
+        seen_ids.add(school_id)
+        state = clean(row[STATE])
+        schools.append(
+            School(
+                school_id=school_id,
+                name=clean(row[SCHOOL_NAME]),
+                city=CITY_CORRECTIONS.get(school_id) or clean_city(row[CITY]),
+                state=STATE_CORRECTIONS.get(state, state),
+                metro_locale=clean(row[METRO_LOCALE]),
             )
+        )
     return schools
 
 

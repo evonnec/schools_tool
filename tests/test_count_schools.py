@@ -18,8 +18,21 @@ class TestCounts:
     def test_total_school_count(self) -> None:
         assert count_schools.total_school_count(SCHOOLS) == 4
 
-    def test_total_counts_each_school_id_once(self) -> None:
-        assert count_schools.total_school_count([*SCHOOLS, SCHOOLS[0]]) == 4
+    def test_total_counts_records_like_the_other_counts(self) -> None:
+        # load_schools keeps one record per school ID; the counts all agree
+        # on whatever list they are given.
+        doubled = [*SCHOOLS, SCHOOLS[0]]
+        assert count_schools.total_school_count(doubled) == 5
+        assert sum(count_schools.schools_per_state(doubled).values()) == 5
+
+    def test_total_accepts_any_iterable(self) -> None:
+        assert count_schools.total_school_count(iter(SCHOOLS)) == 4
+
+    def test_schools_without_a_city_are_left_out_of_city_counts(self) -> None:
+        schools = [*SCHOOLS, School("5", "ALTERNATIVE EDUCATION", "", "FL", "N")]
+        assert count_schools.unique_city_count(schools) == 3
+        assert count_schools.total_school_count(schools) == 5
+        assert count_schools.schools_per_state(schools)["FL"] == 1
 
     def test_schools_per_state(self) -> None:
         assert count_schools.schools_per_state(SCHOOLS) == {"IL": 2, "CO": 2}
@@ -157,7 +170,7 @@ class TestBundledData:
         )
 
     def test_unique_cities(self, bundled_schools: list[School]) -> None:
-        assert count_schools.unique_city_count(bundled_schools) == 5739
+        assert count_schools.unique_city_count(bundled_schools) == 5684
 
     def test_print_counts_loads_the_bundled_data(
         self, capsys: pytest.CaptureFixture[str]
@@ -166,4 +179,4 @@ class TestBundledData:
         lines = capsys.readouterr().out.splitlines()
         assert lines[0] == "Total Schools: 34779"
         assert "City with most schools: CHICAGO, IL (657 schools)" in lines
-        assert lines[-1] == "Unique cities with at least one school: 5739"
+        assert lines[-1] == "Unique cities with at least one school: 5684"

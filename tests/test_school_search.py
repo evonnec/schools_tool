@@ -44,6 +44,9 @@ def lines(results: list[School]) -> list[str]:
         ("ST. MARY'S", ["ST", "MARYS"]),
         ("YUP’IK", ["YUPIK"]),
         ("riverside school 44", ["RIVERSIDE", "SCHOOL", "44"]),
+        ("RIVER`S EDGE", ["RIVERS", "EDGE"]),
+        ("school 044", ["SCHOOL", "44"]),
+        ("000", ["0"]),
         ("CABRILLO (JUAN RODRIGUEZ) HIGH", ["CABRILLO", "JUAN", "RODRIGUEZ", "HIGH"]),
         ("  !!  ", []),
         ("", []),
@@ -66,6 +69,8 @@ def test_abbreviation_equivalents() -> None:
     assert equivalents["ELEMENTARY"] == ["ELEM"]
     assert equivalents["HS"] == ["HIGH", "SCHOOL"]
     assert sorted(equivalents["SCHOOL"]) == ["HS", "SCH", "SCHL"]
+    assert equivalents["SAINT"] == ["ST"]
+    assert equivalents["CO"] == ["COUNTY"]
 
 
 class TestMatching:
@@ -149,6 +154,61 @@ class TestMatching:
         )
         assert index.search("foley foley foley high") == index.search("foley high")
 
+    def test_postal_code_counts_only_as_the_last_word(self) -> None:
+        index = build_index(
+            ("WEST SIDE HIGH SCHOOL", "EAST CHICAGO", "IN"),
+            ("AMUNDSEN HIGH SCHOOL", "CHICAGO", "IL"),
+        )
+        assert index.search("high school in chicago")[0].state == "IL"
+        assert index.search("high school chicago in")[0].state == "IN"
+
+    def test_trailing_postal_code_means_only_the_state(self) -> None:
+        index = build_index(
+            ("LAMAR COUNTY MIDDLE SCHOOL", "BARNESVILLE", "GA"),
+            ("LAMAR MIDDLE SCHOOL", "LAMAR", "CO"),
+        )
+        assert index.search("lamar middle school lamar co")[0].state == "CO"
+        assert index.search("lamar co middle school")[0].state == "GA"
+
+    def test_connecting_words_are_skipped(self) -> None:
+        index = build_index(
+            ("HIGH SCHOOL IN THE COMMUNITY", "NEW HAVEN", "CT"),
+            ("AMUNDSEN HIGH SCHOOL", "CHICAGO", "IL"),
+        )
+        assert index.search("high school in chicago")[0].city == "CHICAGO"
+
+    def test_a_query_of_only_connecting_words_still_searches(self) -> None:
+        index = build_index(
+            ("THE ACADEMY", "MESA", "AZ"), ("PINE SCHOOL", "MESA", "AZ")
+        )
+        assert lines(index.search("the")) == ["THE ACADEMY, MESA, AZ"]
+
+    def test_names_with_connecting_words_are_not_penalized(self) -> None:
+        index = build_index(
+            ("ARTS SCHOOL", "MESA", "AZ"), ("SCHOOL OF THE ARTS", "SAN FRANCISCO", "CA")
+        )
+        assert index.search("school of the arts")[0].name == "SCHOOL OF THE ARTS"
+
+    @pytest.mark.parametrize(
+        ("query", "name"),
+        [
+            ("saint johns", "ST JOHNS HIGH SCHOOL"),
+            ("st johns", "SAINT JOHNS ACADEMY"),
+            ("jackson co", "JACKSON COUNTY HIGH SCHOOL"),
+            ("river's edge", "RIVER`S EDGE ELEMENTARY SCHOOL"),
+            ("riverside school 044", "RIVERSIDE SCHOOL 44"),
+        ],
+    )
+    def test_spelling_variants(self, query: str, name: str) -> None:
+        index = build_index((name, "MESA", "AZ"), ("PINE SCHOOL", "MESA", "AZ"))
+        assert index.search(query)[0].name == name
+
+    def test_long_words_are_fast(self) -> None:
+        index = build_index(("PINE SCHOOL", "MESA", "AZ"))
+        start = time.perf_counter()
+        assert index.search("q" * 5000) == []
+        assert time.perf_counter() - start < 0.05
+
     @pytest.mark.parametrize("query", ["", "   ", "!!!", "zzzzqqq"])
     def test_queries_without_matches(self, query: str) -> None:
         index = build_index(("PINE SCHOOL", "MESA", "AZ"))
@@ -223,6 +283,46 @@ class TestRanking:
             "SELMA MIDDLE SCHOOL, SELMA, AL",
         ]
 
+    def test_abbreviated_name_is_not_outranked_by_other_schools(self) -> None:
+        index = build_index(
+            ("BULLARD ELEMENTARY SCHOOL", "KENNESAW", "GA"),
+            ("CHALKER ELEMENTARY SCHOOL", "KENNESAW", "GA"),
+            ("HAYES ELEMENTARY SCHOOL", "KENNESAW", "GA"),
+            ("KENNESAW ELEM SCHOOL", "KENNESAW", "GA"),
+        )
+        assert (
+            index.search("kennesaw elementary school")[0].name == "KENNESAW ELEM SCHOOL"
+        )
+
+    def test_city_words_in_the_query_are_not_expected_in_the_name(self) -> None:
+        index = build_index(
+            ("SAN RAMON VALLEY HIGH", "DANVILLE", "CA"),
+            ("CALIFORNIA HIGH", "SAN RAMON", "CA"),
+        )
+        assert index.search("california high san ramon")[0].name == "CALIFORNIA HIGH"
+
+    def test_city_words_repeated_in_a_name_do_not_win_ties(self) -> None:
+        index = build_index(
+            ("SAN JOSE HIGH ACADEMY", "SAN JOSE", "CA"),
+            ("THE ACADEMY", "SAN JOSE", "CA"),
+        )
+        assert index.search("the academy san jose ca")[0].name == "THE ACADEMY"
+
+    def test_name_containing_the_query_beats_a_school_located_there(self) -> None:
+        index = build_index(
+            ("MOUNTAINAIRE ACADEMY", "ST JOHNS", "AZ"),
+            ("ST JOHNS HIGH SCHOOL", "ST JOHNS", "AZ"),
+        )
+        assert index.search("saint johns")[0].name == "ST JOHNS HIGH SCHOOL"
+
+    def test_word_order_breaks_ties(self) -> None:
+        index = build_index(
+            ("FOREST PARK MIDDLE SCHOOL", "FOREST PARK", "IL"),
+            ("ILLINOIS SCHOOL", "PARK FOREST", "IL"),
+        )
+        assert index.search("illinois school park forest")[0].name == "ILLINOIS SCHOOL"
+        assert index.search("forest park school")[0].name == "FOREST PARK MIDDLE SCHOOL"
+
     def test_order_does_not_depend_on_input_order(self) -> None:
         rows = [
             ("PINE ELEMENTARY", "MESA", "AZ"),
@@ -252,6 +352,11 @@ def test_format_results() -> None:
     assert format_results("zzz", [], 0) == (
         'Results for "zzz" (search took: 0.000s)\nNo matching schools.'
     )
+    no_city = [School("2", "ALTERNATIVE EDUCATION", "", "FL", "N")]
+    assert format_results("alt", no_city, 0).splitlines()[1:] == [
+        "1. ALTERNATIVE EDUCATION",
+        "FL",
+    ]
 
 
 def test_search_schools_prints_and_returns_results(
@@ -335,9 +440,14 @@ class TestReadmeCases:
     def test_common_word_queries_run_under_200ms(
         self, bundled_index: SchoolIndex, query: str
     ) -> None:
-        start = time.perf_counter()
-        bundled_index.search(query)
-        assert time.perf_counter() - start < 0.2
+        # The slowest realistic queries: a word most schools share. Best of
+        # three, so a busy machine doesn't fail the test.
+        timings = []
+        for _ in range(3):
+            start = time.perf_counter()
+            bundled_index.search(query)
+            timings.append(time.perf_counter() - start)
+        assert min(timings) < 0.2
 
 
 class TestProperties:

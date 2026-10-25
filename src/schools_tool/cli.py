@@ -1,6 +1,7 @@
 """Command line: `schools-tool counts` and `schools-tool search`."""
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -50,15 +51,31 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        return run(parser, args)
+    except BrokenPipeError:
+        # The reader went away (e.g. `| head`). Point stdout at devnull so
+        # the flush at exit doesn't raise again, as the Python docs advise.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        return 1
+
+
+def run(parser: argparse.ArgumentParser, args: argparse.Namespace) -> int:
+    try:
         schools = load_schools(args.data)
     except (OSError, ValueError) as error:
         parser.error(str(error))
 
     if args.command == "counts":
-        print_counts(schools)
+        written = []
         if args.output_dir:
-            for path in write_counts(schools, args.output_dir):
-                print(f"Wrote {path}", file=sys.stderr)
+            try:
+                written = write_counts(schools, args.output_dir)
+            except OSError as error:
+                parser.error(f"cannot write to --output-dir: {error}")
+        print_counts(schools)
+        for path in written:
+            print(f"Wrote {path}", file=sys.stderr)
         return 0
 
     index = SchoolIndex(schools, load_state_names())

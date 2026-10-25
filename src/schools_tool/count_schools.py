@@ -20,7 +20,9 @@ def count_by[K](schools: Iterable[School], key: Callable[[School], K]) -> dict[K
 
 
 def total_school_count(schools: Iterable[School]) -> int:
-    return len({school.school_id for school in schools})
+    """One per school record, like the other counts; load_schools keeps one
+    record per school ID."""
+    return sum(1 for _ in schools)
 
 
 def schools_per_state(schools: Iterable[School]) -> dict[str, int]:
@@ -33,7 +35,9 @@ def schools_per_metro_locale(schools: Iterable[School]) -> dict[str, int]:
 
 
 def schools_per_city(schools: Iterable[School]) -> dict[City, int]:
-    return count_by(schools, lambda school: (school.city, school.state))
+    """Schools per city; schools with no known city are left out."""
+    with_city = (school for school in schools if school.city)
+    return count_by(with_city, lambda school: (school.city, school.state))
 
 
 def cities_with_most_schools(schools: Iterable[School]) -> tuple[list[City], int]:
