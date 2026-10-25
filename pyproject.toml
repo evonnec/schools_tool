@@ -1,0 +1,41 @@
+[project]
+name = "schools-tool"
+# Semantic versioning: bump with `uv version --bump major|minor|patch`, then
+# tag the commit vX.Y.Z to publish a release (see README "Releasing").
+version = "0.1.0"
+description = "Count and search the NCES 2005-06 public school dataset"
+readme = "README.md"
+license-files = ["LICENSE"]
+requires-python = ">=3.15"
+# The challenge allows only the standard library (csv, time, itertools).
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=2.4",
+    "pytest>=9.1",
+    "ruff>=0.17",
+]
+
+[tool.ruff]
+line-length = 88
+# Only the package and its tests; research notebooks and local scratch files
+# are left alone.
+include = ["src/**/*.py", "tests/**/*.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.15"
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers"]
+filterwarnings = ["error"]
