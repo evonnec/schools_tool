@@ -133,3 +133,57 @@ Results for "KUSKOKWIM" (search took: 0.001s)
 NIKOLAI, AK
 (No additional results should be returned)
 ```
+
+## Repository layout
+
+```
+src/schools_tool/   count_schools.py (Part 1) and school_search.py (Part 2)
+tests/              pytest suite, including the test cases above
+input/              school_data.csv (Part 0) and name-abbr.csv (state names)
+research/           exploratory notebooks, not part of the package
+```
+
+## Development
+
+The project uses [uv](https://docs.astral.sh/uv/) with Python 3.15, which is pinned in `.python-version`.
+
+```bash
+uv sync               # create .venv with the package and dev tools
+uv run pytest         # tests
+uv run ruff check     # lint
+uv run ruff format    # format (CI runs ruff format --check)
+uv run mypy           # type check
+uv build              # build the sdist and wheel into dist/
+```
+
+The modules read `./input/*.csv` relative to the working directory, so run them from the repository root:
+
+```bash
+uv run python -c "from schools_tool import count_schools; count_schools.print_counts()"
+uv run python -c "from schools_tool import school_search; school_search.search_schools('foley high alabama')"
+```
+
+CI (`.github/workflows/ci.yml`) runs the test, lint, type check, format, and build jobs on every pull request and every push to `main`.
+
+## Releasing
+
+Versions follow [semantic versioning](https://semver.org/) and live in `pyproject.toml`.
+
+1. On a branch, bump the version with `uv version --bump patch`, `minor`, or `major`, then merge it.
+2. Tag the merge commit with the new version and push the tag:
+   ```bash
+   git tag v0.1.1
+   git push origin v0.1.1
+   ```
+3. `.github/workflows/release.yml` checks that the tag matches the version in `pyproject.toml`, runs the tests, builds the wheel and sdist, and attaches both to a GitHub Release.
+
+Install a released wheel straight from its release page:
+
+```bash
+uv pip install https://github.com/evonnec/schools_tool/releases/download/v0.1.0/schools_tool-0.1.0-py3-none-any.whl
+```
+
+GitHub Packages has no Python registry, so PyPI is the package registry for this project. Publishing there is off by default. To turn it on:
+
+1. On PyPI, add a trusted publisher for this repository with workflow `release.yml` and environment `pypi`.
+2. Set the repository variable `PUBLISH_TO_PYPI` to `true`.
