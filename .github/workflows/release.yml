@@ -28,8 +28,8 @@ jobs:
       - run: uv sync --locked
       - run: uv run pytest
       - run: uv build
-      - name: Smoke-test the wheel outside the project
-        run: uv run --isolated --no-project --with dist/*.whl python -c "import schools_tool.count_schools, schools_tool.school_search"
+      - name: Search with the installed wheel and its bundled data
+        run: uv run --isolated --no-project --with dist/*.whl schools-tool search kuskokwim | grep "TOP OF THE KUSKOKWIM SCHOOL"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: dist

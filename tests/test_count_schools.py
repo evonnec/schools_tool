@@ -4,134 +4,179 @@ from pathlib import Path
 import pytest
 
 from schools_tool import count_schools
+from schools_tool.dataset import School
 
-HEADER = "NCESSCH,LEAID,LEANM05,SCHNAM05,LCITY05,LSTATE05,LATCOD,LONCOD,MLOCALE,ULOCALE,status05"
-
-
-def school_row(
-    school_id: str, name: str, city: str, state: str, metro_locale: str = "1"
-) -> list[str]:
-    """An 11-column row shaped like input/school_data.csv."""
-    return [
-        school_id,
-        "0",
-        "AGENCY",
-        name,
-        city,
-        state,
-        "0",
-        "0",
-        metro_locale,
-        "11",
-        "1",
-    ]
-
-
-@pytest.fixture
-def write_school_csv(tmp_path: Path):
-    """Write rows under the school_data.csv header and return the file path."""
-
-    def write(rows: list[list[str]]) -> str:
-        path = tmp_path / "school_data.csv"
-        with path.open("w", newline="", encoding="iso-8859-1") as f:
-            f.write(HEADER + "\n")
-            csv.writer(f).writerows(rows)
-        return str(path)
-
-    return write
-
-
-ROWS = [
-    school_row("1", "LINCOLN ELEMENTARY", "SPRINGFIELD", "IL", metro_locale="2"),
-    school_row("2", "WASHINGTON HIGH", "SPRINGFIELD", "IL", metro_locale="2"),
-    school_row("3", "SPRINGFIELD MIDDLE", "SPRINGFIELD", "CO", metro_locale="N"),
-    school_row("4", "PINE SCHOOL", "DENVER", "CO", metro_locale="1"),
+SCHOOLS = [
+    School("1", "LINCOLN ELEMENTARY", "SPRINGFIELD", "IL", "2"),
+    School("2", "WASHINGTON HIGH", "SPRINGFIELD", "IL", "2"),
+    School("3", "SPRINGFIELD MIDDLE", "SPRINGFIELD", "CO", "N"),
+    School("4", "PINE SCHOOL", "DENVER", "CO", "1"),
 ]
-
-
-class TestGetDf:
-    def test_skips_header_and_returns_every_row(self, write_school_csv) -> None:
-        path = write_school_csv(ROWS)
-        assert count_schools.get_df(path) == ROWS
-
-    def test_rejects_rows_with_the_wrong_number_of_columns(
-        self, write_school_csv
-    ) -> None:
-        path = write_school_csv([["1", "too", "short"]])
-        with pytest.raises(ValueError):
-            count_schools.get_df(path)
-
-    def test_header_only_file_has_no_rows(self, write_school_csv) -> None:
-        assert count_schools.get_df(write_school_csv([])) == []
 
 
 class TestCounts:
     def test_total_school_count(self) -> None:
-        assert count_schools.total_school_count(ROWS) == 4
+        assert count_schools.total_school_count(SCHOOLS) == 4
 
-    def test_total_school_count_ignores_duplicate_ids(self) -> None:
-        duplicate = school_row("1", "LINCOLN ELEMENTARY", "SPRINGFIELD", "IL")
-        assert count_schools.total_school_count([*ROWS, duplicate]) == 4
+    def test_total_counts_records_like_the_other_counts(self) -> None:
+        # load_schools keeps one record per school ID; the counts all agree
+        # on whatever list they are given.
+        doubled = [*SCHOOLS, SCHOOLS[0]]
+        assert count_schools.total_school_count(doubled) == 5
+        assert sum(count_schools.schools_per_state(doubled).values()) == 5
 
-    def test_schools_per_state_count(self) -> None:
-        assert count_schools.schools_per_state_count(ROWS) == {
-            "IL": {"school_count": 2},
-            "CO": {"school_count": 2},
+    def test_total_accepts_any_iterable(self) -> None:
+        assert count_schools.total_school_count(iter(SCHOOLS)) == 4
+
+    def test_schools_without_a_city_are_left_out_of_city_counts(self) -> None:
+        schools = [*SCHOOLS, School("5", "ALTERNATIVE EDUCATION", "", "FL", "N")]
+        assert count_schools.unique_city_count(schools) == 3
+        assert count_schools.total_school_count(schools) == 5
+        assert count_schools.schools_per_state(schools)["FL"] == 1
+
+    def test_schools_per_state(self) -> None:
+        assert count_schools.schools_per_state(SCHOOLS) == {"IL": 2, "CO": 2}
+
+    def test_schools_per_metro_locale(self) -> None:
+        assert count_schools.schools_per_metro_locale(SCHOOLS) == {
+            "2": 2,
+            "N": 1,
+            "1": 1,
         }
 
-    def test_schools_per_metro_count(self) -> None:
-        assert count_schools.schools_per_metro_count(ROWS) == {
-            "2": {"school_count": 2},
-            "N": {"school_count": 1},
-            "1": {"school_count": 1},
+    def test_cities_are_city_and_state_pairs(self) -> None:
+        assert count_schools.schools_per_city(SCHOOLS) == {
+            ("SPRINGFIELD", "IL"): 2,
+            ("SPRINGFIELD", "CO"): 1,
+            ("DENVER", "CO"): 1,
         }
+        assert count_schools.unique_city_count(SCHOOLS) == 3
 
-    def test_cities_are_keyed_by_city_and_state_and_ranked(self) -> None:
-        assert count_schools.schools_per_city_count(ROWS) == [
-            ("springfield|il", {"school_count": 2}),
-            ("springfield|co", {"school_count": 1}),
-            ("denver|co", {"school_count": 1}),
+    def test_city_with_most_schools(self) -> None:
+        assert count_schools.cities_with_most_schools(SCHOOLS) == (
+            [("SPRINGFIELD", "IL")],
+            2,
+        )
+
+    def test_tied_cities_are_all_reported_alphabetically(self) -> None:
+        assert count_schools.cities_with_most_schools(SCHOOLS[2:]) == (
+            [("DENVER", "CO"), ("SPRINGFIELD", "CO")],
+            1,
+        )
+
+    def test_no_schools(self) -> None:
+        assert count_schools.total_school_count([]) == 0
+        assert count_schools.schools_per_state([]) == {}
+        assert count_schools.cities_with_most_schools([]) == ([], 0)
+        assert count_schools.unique_city_count([]) == 0
+
+
+class TestFormatCounts:
+    def test_matches_the_readme_format(self) -> None:
+        assert count_schools.format_counts(SCHOOLS) == "\n".join(
+            [
+                "Total Schools: 4",
+                "Schools by State:",
+                "CO: 2",
+                "IL: 2",
+                "Schools by Metro-centric locale:",
+                "1: 1",
+                "2: 2",
+                "N: 1",
+                "City with most schools: SPRINGFIELD, IL (2 schools)",
+                "Unique cities with at least one school: 3",
+            ]
+        )
+
+    def test_ties(self) -> None:
+        report = count_schools.format_counts(SCHOOLS[2:])
+        assert (
+            "Cities with most schools: DENVER, CO; SPRINGFIELD, CO (1 schools each)"
+            in report.splitlines()
+        )
+
+    def test_no_schools(self) -> None:
+        assert count_schools.format_counts([]).splitlines() == [
+            "Total Schools: 0",
+            "Schools by State:",
+            "Schools by Metro-centric locale:",
+            "City with most schools: none",
+            "Unique cities with at least one school: 0",
         ]
 
-    def test_empty_input(self) -> None:
-        assert count_schools.total_school_count([]) == 0
-        assert count_schools.schools_per_state_count([]) == {}
-        assert count_schools.schools_per_city_count([]) == []
+
+def test_print_counts_prints_the_report(capsys: pytest.CaptureFixture[str]) -> None:
+    count_schools.print_counts(SCHOOLS)
+    assert capsys.readouterr().out == count_schools.format_counts(SCHOOLS) + "\n"
 
 
-def test_format_result() -> None:
-    result = count_schools.format_result(
-        {"IL": {"school_count": 2}, "CO": {"school_count": 1}}
-    )
-    assert result == "IL : {'school_count': 2}\nCO : {'school_count': 1}\n"
+def test_write_counts(tmp_path: Path) -> None:
+    output_dir = tmp_path / "output"
+    written = count_schools.write_counts(SCHOOLS, output_dir)
+
+    def read(name: str) -> list[list[str]]:
+        with (output_dir / name).open(newline="") as f:
+            return list(csv.reader(f))
+
+    assert sorted(path.name for path in written) == [
+        "schools_by_city.csv",
+        "schools_by_metro_locale.csv",
+        "schools_by_state.csv",
+        "summary.csv",
+    ]
+    assert read("summary.csv") == [
+        ["metric", "value"],
+        ["total_schools", "4"],
+        ["unique_cities", "3"],
+        ["most_schools_in_a_city", "2"],
+        ["cities_with_most_schools", "SPRINGFIELD, IL"],
+    ]
+    assert read("schools_by_state.csv") == [
+        ["state", "school_count"],
+        ["CO", "2"],
+        ["IL", "2"],
+    ]
+    assert read("schools_by_city.csv") == [
+        ["city", "state", "school_count"],
+        ["SPRINGFIELD", "IL", "2"],
+        ["DENVER", "CO", "1"],
+        ["SPRINGFIELD", "CO", "1"],
+    ]
 
 
-@pytest.mark.usefixtures("in_repo_root")
-class TestSchoolData:
-    """Counts over the real input/school_data.csv."""
+class TestBundledData:
+    """The Part 1 answers for the dataset shipped in the package."""
 
-    def test_total_schools(self) -> None:
-        assert count_schools.total_school_count(count_schools.get_df()) == 34779
+    def test_total(self, bundled_schools: list[School]) -> None:
+        assert count_schools.total_school_count(bundled_schools) == 34779
 
-    def test_schools_by_state(self) -> None:
-        by_state = count_schools.schools_per_state_count(count_schools.get_df())
-        assert len(by_state) == 21
-        assert by_state["CA"] == {"school_count": 9969}
+    def test_states(self, bundled_schools: list[School]) -> None:
+        per_state = count_schools.schools_per_state(bundled_schools)
+        assert len(per_state) == 20
+        assert per_state["CA"] == 9969
+        assert per_state["DC"] == 230
+        assert "C" not in per_state
 
-    def test_schools_by_metro(self) -> None:
-        by_metro = count_schools.schools_per_metro_count(count_schools.get_df())
-        assert len(by_metro) == 9
-        assert sum(count["school_count"] for count in by_metro.values()) == 34779
+    def test_metro_locales(self, bundled_schools: list[School]) -> None:
+        per_locale = count_schools.schools_per_metro_locale(bundled_schools)
+        assert sorted(per_locale) == ["1", "2", "3", "4", "5", "6", "7", "8", "N"]
+        assert per_locale["N"] == 1096
+        assert sum(per_locale.values()) == 34779
 
-    def test_schools_by_city(self) -> None:
-        by_city = count_schools.schools_per_city_count(count_schools.get_df())
-        assert len(by_city) == 5752
-        assert by_city[0] == ("chicago|il", {"school_count": 657})
+    def test_city_with_most_schools(self, bundled_schools: list[School]) -> None:
+        assert count_schools.cities_with_most_schools(bundled_schools) == (
+            [("CHICAGO", "IL")],
+            657,
+        )
 
-    def test_print_counts(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_unique_cities(self, bundled_schools: list[School]) -> None:
+        assert count_schools.unique_city_count(bundled_schools) == 5670
+
+    def test_print_counts_loads_the_bundled_data(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         count_schools.print_counts()
-        out = capsys.readouterr().out
-        assert "total schools:\n34779\n" in out
-        assert "CA : {'school_count': 9969}" in out
-        assert "('chicago|il', {'school_count': 657})" in out
-        assert "number of unique cities with one school or more:\n5752\n" in out
+        lines = capsys.readouterr().out.splitlines()
+        assert lines[0] == "Total Schools: 34779"
+        assert "City with most schools: CHICAGO, IL (657 schools)" in lines
+        assert lines[-1] == "Unique cities with at least one school: 5670"
